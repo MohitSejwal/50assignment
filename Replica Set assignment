@@ -1,0 +1,38 @@
+DaemonSets should be used when a single copy of your application must run on all or a subset of the nodes in the cluster.
+Some typical uses of a DaemonSet are:
+running a cluster storage daemon on every node.
+running a logs collection daemon on every node.
+running a node monitoring daemon on every node.
+
+The typical use case of a DaemonSet is logging and monitoring for the hosts. For example, a node needs a service (daemon) that collects health or log data and pushes them to a central system or database (like ELK stack).
+ In the case of DaemonSet it will ensure that one copy of pod defined in our configuration will always be available on every worker node.
+
+The total # of pods running in DaemonSet = Number of worker nodes in our cluster
+
+If a new node is added in our cluster then DaemonSet will automatically allocate pod on that node. Similarly, if a node is deleted then the pod running on the node is also destroyed, it will not reschedule the pod on different nodes as in case of ReplicaSet.
+
+One of the common use-case, where we will use a daemon set instead of replica set for creating a pod containing nginx image.
+
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    app: nginx
+  name: example-daemon
+spec:
+  template:
+     metadata:
+       labels:
+        app: nginx
+     spec:   
+       containers:
+         – name: nginx
+           image: nginx
+
+This is the configuration of a DaemonSet for nginx.
+
+To create the Deamon Set, we have to execute below commands.
+
+ kubectl create -f DemonSet.yml
+
+This daemonSet will create a pod in every node running in our cluster.
