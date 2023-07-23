@@ -1,0 +1,162 @@
+I am trying to run my app using Kubernetes I have created a deployment from file called deployment.yaml a service from the file called service.yaml
+Here is the content of deployment.yaml:
+
+apiVersion: v1
+kind: Pod
+
+    metadata:
+      name: kubectl-test
+    spec:
+      containers:
+        - name: kubectl-test
+          image: gcr.io/[my-name]/node-app:0.0.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              hostPort: 8080
+
+This is my services.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  #Service name
+  name: kubectl-test-node-app
+spec:
+  selector:
+    app: kubectl-test-189010
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: LoadBalancer
+
+When I run the command kubectl get deployments, I can see:
+
+NAME                  DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+kubernetes-bootcamp   1         1         1            1           16m
+
+I can see my services by using kubectl get services and I can see:
+
+NAME                    TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
+kubectl-test-node-app   LoadBalancer   10.59.242.211   35.195.2.76   8000:31592/TCP   8m
+kubernetes              ClusterIP      10.59.240.1     <none>        443/TCP          1d
+
+When I try to visit the EXTERNAL-IP:8000 I cant see my app there, I don't get any error, but I don't know what is going wrong!
+So I followed some approach and sequentially all the steps that will help to find out the issue.
+
+I had to create deployment using:
+
+`kubectl run kubernetes-bootcamp --image=[image-name] --port=8080`
+but not with this command
+
+`kubectl create -f deployment.yaml`
+Is this related to the port: 8000:31592/TCP ?
+
+kubectl get pods
+kubectl-test                           1/1       Running   0          4h
+kubernetes-bootcamp-1654181842-czwqg   1/1       Running   0          3h
+
+Running the command kubectl describe services kubectl-test-node-app returns:
+
+Name:                     kubectl-test-node-app
+Namespace:                default
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=kubectl-test-189010
+Type:                     LoadBalancer
+IP:                       10.59.242.211
+LoadBalancer Ingress:     35.195.2.76
+Port:                     <unset>  8000/TCP
+TargetPort:               8000/TCP
+NodePort:                 <unset>  31592/TCP
+Endpoints:                <none>
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:
+  Type    Reason                Age   From                Message
+  ----    ------                ----  ----                -------
+  Normal  CreatingLoadBalancer  58m   service-controller  Creating load balancer
+  Normal  CreatedLoadBalancer   57m   service-controller  Created load balancer
+There are no endpoints defined. I guess this is the problem.
+
+My service specification target all pods with label "app=kubectl-test-189010" which your pod's specification doesn't have.
+
+I need to update pod's metadata so it will match selector from service spec:
+
+    metadata:
+       name: kubectl-test
+       app: kubectl-test-189010
+Also your service accept connections on port 8000 and then forward it to port 8000 (targetPort) on pod. But pod listen on port 8080 (containerPort). So one of them should be changed to match another - targetPort or containerPort.
+
+My selectors in my pod and service aren't in sync. Also, looking at the output for kubectl get services, my app is exposed outside the cluster on NodePort 31592. 
+I'm not sure what my desired NodePort is, but if I want to expose my app outside the cluster on port 32000(for example), I could use the configs below. Then I should be able to access my app with http://<CLUSTER_IP>:32000/
+
+# deployment.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: kubectl-test
+  labels:
+    app: kubectl-test
+spec:
+  replicas: 3
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: kubectl-test
+    spec:
+      containers:
+      - image: gcr.io/[my-name]/node-app:0.0.1
+        name: kubectl-test
+        ports:
+        - containerPort: 8080
+        resources: {}
+      restartPolicy: Always
+status: {}
+
+# service.yml
+kind: Service
+metadata:  
+  name: kubectl-test-node-app   
+  labels:
+    app: kubectl-test
+spec:
+  ports:
+    - protocol: TCP
+      name: "8080"
+      port: 8080
+      targetPort: 8080
+      nodePort: 32000
+  selector:
+    app: kubectl-test
+  type: LoadBalancer
+  sessionAffinity: None
+  externalTrafficPolicy: Cluster
+status: 
+  loadBalancer: {}
+
+kubectl create -f deployment.yml
+kubectl create -f service.yml
+
+Deployment is an object, that will create ReplicaSets and scale them so that they result with a particular group of underlying Pods launched in cluster. Taken from Deployments metadata, they will have some labels. These labels are what Service will match it's selector against (labels&selectors). I do assume you do want to use Deployment, to leverage stuff like rolling updates (it's generaly very hard to update Pod in many cases, and you end up deleting and recreating it manualy) or scaling.
+
+With that assumption, you need Deployment (or Pod if you really want to go the "manual" way), that has something like folowing
+
+metadata:
+  labels:
+    app: myappname
+followed by Service that has a selector defined similarly
+
+selector:
+  app: myappname
+that should be enough for you to have a working setup, and you should see your service will now have active endpoints (assuming your pods are launched and in Ready state.
+
+Also, if you want to contain version in your labels, so that you can ie. target particular pod version with a service, or maybe use it for another reason like pod affinity, you should split it into two labels like
+
+metadata:
+  labels:
+    app: myappname
+    ver: v12
+Finally I was able to fix it, I had to change the dokcerfile and made some adjustments, then my deployment.yaml file had to be also changed a little, mainly adding the correct name and port number and the same in my service.yaml, and finally my webpack configuration had to be changed!
